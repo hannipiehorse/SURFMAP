@@ -10,3 +10,6 @@ example/output**
 .env
 .Rhistory
 **.egg-info
+# SurfMap artifacts
+outputs/
+surfmap_runs/
