@@ -51,20 +51,6 @@ def get_args():
         help="Path name of the electrostatics directory content"
     )
     
-    parser.add_argument(
-        "-ph",
-        type=float,
-        default=7.0,
-        help="pH value for the calculation (default: 7.0)"
-    )
-
-    parser.add_argument(
-        "-salt",
-        type=float,
-        default=0.0,
-        help="Salt concentration in M (default: 0.0)"
-    )
-
     return parser.parse_args()
 
 
@@ -81,7 +67,7 @@ def edit_inputgen(inputgen_file: Union[str, Path], pqrfile: Union[str, Path]):
         _file.write(data)
 
 
-def run(pdb_filename: Union[str, Path], csv_filename: Union[str, Path], force_field: str="CHARMM", pqr_filename: Union[str, Path]="", out_dir: Union[str, Path]=".", ph: float=7.0, salt: float=0.15) -> str:
+def run(pdb_filename: Union[str, Path], csv_filename: Union[str, Path], force_field: str="CHARMM", pqr_filename: Union[str, Path]="", out_dir: Union[str, Path]="."):
     """Calls the function run_compute_electrostatics() to compute electrostatics potential of the PDB file.
 
     Args:
@@ -118,7 +104,7 @@ def run(pdb_filename: Union[str, Path], csv_filename: Union[str, Path], force_fi
     # compute pqr file if not given as input
     outfile_pqr = f"{outfile_basename}.pqr"
     if not pqr_filename:
-        cmd_pdb2pqr = ["pdb2pqr30", "--ff", "CHARMM", "--whitespace", "--with-ph", str(ph), "--with-salt", str(salt), pdb_filename, outfile_pqr]
+        cmd_pdb2pqr = ["pdb2pqr30", "--ff", "CHARMM", "--whitespace", pdb_filename, outfile_pqr]
         logger.debug("Convert PDB to PQR format")
         status = subprocess.run(cmd_pdb2pqr, capture_output=True)
         if status.returncode != 0:
@@ -186,9 +172,7 @@ def main():
         csv_filename=args.csv,
         pqr_filename=args.pqr,
         out_dir=args.out,
-        force_field="CHARMM",  # add this if not present
-        ph=args.ph,
-        salt=args.salt
+        out_subdir=args.subdir
     )
 
-
+    
