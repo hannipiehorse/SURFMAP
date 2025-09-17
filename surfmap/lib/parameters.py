@@ -90,6 +90,22 @@ def get_args():
     )
 
     parser.add_argument(
+        "--salt",
+        required=False,
+        type=float,
+        default=None,
+        help="Monovalent salt concentration in mol/L for APBS ionic strength (e.g., 0.15). Only used for -tomap electrostatics."
+    )
+
+    parser.add_argument(
+        "--ph",
+        required=False,
+        type=float,
+        default=None,
+        help="Target pH for PDB2PQR/PROPKA when computing electrostatics (0–14)."
+    )
+
+    parser.add_argument(
         "--bfactor-min-value",
         required=False,
         type=float,
@@ -180,6 +196,8 @@ class Parameters:
     - rad: float  # radius used for shell computation
     - cellsize: str  # unit size of a grid cell
     - elec_max_value: str  # Maximum absolute color value to be used for the electrostatics color scale definition (e.g. 6.3)
+    - salt: float=None  # Ionic strength in mol/L for APBS (electrostatics only). None = leave APBS default.
+    - ph: float=None  # target protonation pH
     - bfactor_min_value: str  # Minimum bfactor value to be used for the bfactor color scale
     - bfactor_max_value: str  # Maximum bfactor value to be used for the bfactor color scale
     - coordstomap: Any = None  #
@@ -291,6 +309,11 @@ class Parameters:
         self.png: bool = args.png
         self.keep: bool = args.keep
         self.docker: bool = args.docker
+        # ionic strength (only meaningful for electrostatics)
+        self.salt = args.salt if self.ppttomap == "electrostatics" else None
+        self._check_salt()
+        self.ph = args.ph if self.ppttomap == "electrostatics" else None
+        self._check_ph()
         
         # define and create output directory if not exists
         self.DEFAULT_OUTDIR_BASENAME = "output_SURFMAP_{}_{}"
@@ -302,6 +325,32 @@ class Parameters:
         else:
             print("Warning: verbose level must be either 0, 1, or 2. Use of the default verbose level (1)")
             self.verbose = self.VERBOSE_MAP[1]
+
+    def _check_salt(self):
+        # Allow None when not used; otherwise enforce a sane range
+        if self.salt is None:
+            return
+        try:
+            s = float(self.salt)
+        except Exception:
+            print("Invalid value for --salt; please provide a number in mol/L, e.g., 0.10")
+            exit()
+        if not (0.0 <= s <= 1.5):
+            print("Salt concentration (--salt) must be between 0.0 and 1.5 M.")
+            exit()
+
+    # validator 
+    def _check_ph(self):
+        if self.ph is None:
+            return
+        try:
+            p = float(self.ph)
+        except Exception:
+            print("Invalid value for --ph; please provide a number, e.g., 4.0")
+            exit()
+        if not (0.0 <= p <= 14.0):
+            print("pH (--ph) must be between 0.0 and 14.0.")
+            exit()
 
     def _check_surfmap_requirements(self):
         """Check if requirements are satisfied (will exit if not).
@@ -380,6 +429,7 @@ Parameters used to compute the maps:
 - Unit size of the grid cell (-s): {}
 - Grid resolution: {}
 - Max absolute value for electrostatics color scale: {}
+- Ionic Strength (--salt, M): {}
 - Min value for bfactor color scale: {}
 - Max value for bfactor color scale: {}
 - Map not smoothed (--nosmooth): {}
@@ -397,6 +447,7 @@ Parameters used to compute the maps:
         self.cellsize,
         f"{int(360 / self.cellsize)}*{int(180 / self.cellsize)}",
         self.elec_max_value if self.elec_max_value is not None else "None",
+        self.salt if self.salt is not None else "None",
         self.bfactor_min_value if self.bfactor_min_value is not None else "None",
         self.bfactor_max_value if self.bfactor_max_value is not None else "None",
         self.nosmooth,
