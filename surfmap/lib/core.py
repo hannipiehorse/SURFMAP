@@ -5,6 +5,13 @@ from pathlib import Path
 import shutil
 import subprocess
 from typing import Tuple, Union
+import os
+import numpy
+# Headless backend so this works inside Docker with no GUI
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib import colors as mcolors
 
 from surfmap import PATH_MSMS, __COPYRIGHT_FULL__
 from surfmap.lib.logs import get_logger
@@ -144,6 +151,138 @@ def compute_map(params: Parameters, matrix_file: str, property: str, reslist: st
 
     return proc_status, out_png, out_pdf
 
+def _load_coords_and_values(particles_file: Union[str, Path]):
+    """
+    Try to load Nx3 coordinates + a single property column from the particle list.
+    This is the file returned by run_particles_mapping and then passed to compute_coords_list.
+    We accept either comma-separated or whitespace-separated formats, with or without headers.
+    Expected columns (best case): x,y,z,<value> (names can vary in case).
+    Fallback: first 3 numeric columns are XYZ, last numeric column is the value.
+    """
+    particles_file = str(particles_file)
+
+    def _try_read(delimiter, names):
+        try:
+            return np.genfromtxt(particles_file, delimiter=delimiter, names=names, dtype=float, autostrip=True)
+        except Exception:
+            return None
+
+    # 1) Try CSV with header, then whitespace with header
+    data = _try_read(",", True) or _try_read(None, True)
+
+    # 2) If no header parse worked, try without names
+    if data is None or (hasattr(data, "shape") and data.shape == ()):
+        data = _try_read(",", False) or _try_read(None, False)
+
+    if data is None:
+        raise ValueError(f"Could not parse particle file: {particles_file}")
+
+    # If structured array with names, look for common x/y/z names
+    if data.dtype.names:
+        names = [n.lower() for n in data.dtype.names]
+        def _get(name_options):
+            for opt in name_options:
+                if opt in names:
+                    return data[ data.dtype.names[names.index(opt)] ]
+            return None
+
+        xs = _get(["x", "xs", "coordx"])
+        ys = _get(["y", "ys", "coordy"])
+        zs = _get(["z", "zs", "coordz"])
+        # value column: try common names then fallback to the last column
+        vals = (_get(["value", "val", "prop", "property", "electrostatics", "bfactor"])
+                or data[data.dtype.names[-1]])
+
+        if xs is None or ys is None or zs is None:
+            # fallback: take first 3 numeric columns as XYZ
+            mat = np.column_stack([data[n] for n in data.dtype.names])
+            if mat.shape[1] < 4:
+                raise ValueError("Expected at least 4 columns (x,y,z,value).")
+            coords = mat[:, :3]
+            values = mat[:, -1]
+        else:
+            coords = np.column_stack([xs, ys, zs])
+            values = np.asarray(vals)
+    else:
+        # Plain numeric matrix
+        mat = np.asarray(data)
+        if mat.ndim == 1:
+            mat = mat.reshape(1, -1)
+        if mat.shape[1] < 4:
+            raise ValueError(f"Expected at least 4 numeric columns in {particles_file}; got shape {mat.shape}")
+        coords = mat[:, :3]
+        values = mat[:, -1]
+
+    # Basic sanity
+    if coords.shape[0] != values.shape[0]:
+        raise ValueError(f"Row count mismatch between coords and values in {particles_file}")
+
+    return coords, values
+
+
+def _set_equal_3d_axes(ax, coords):
+    """Make the 3D axes use the same scale so the protein doesn't look squashed."""
+    mins = coords.min(axis=0)
+    maxs = coords.max(axis=0)
+    centers = (mins + maxs) / 2.0
+    span = (maxs - mins).max()
+    for setter, c in zip([ax.set_xlim, ax.set_ylim, ax.set_zlim], centers):
+        r = span / 2.0
+        setter([c - r, c + r])
+
+
+def plot_3d_scatter(coords, values, out_path,
+                    prop_name="value",
+                    point_size=2.0, alpha=0.9,
+                    elev=20.0, azim=35.0,
+                    dpi=300,
+                    elec_max_abs=None):
+    """
+    Minimal, robust 3D scatter that works headless.
+    - coords: (N,3)
+    - values: (N,)
+    - elec_max_abs: if not None, fix color scale to [-M, +M] (handy for electrostatics)
+    """
+    coords = np.asarray(coords, float)
+    values = np.asarray(values, float)
+    if coords.ndim != 2 or coords.shape[1] != 3:
+        raise ValueError(f"coords must be (N,3), got {coords.shape}")
+    if values.ndim != 1 or values.shape[0] != coords.shape[0]:
+        raise ValueError(f"values must be (N,), got {values.shape}")
+
+    fig = plt.figure(figsize=(6, 6), dpi=dpi)
+    ax = fig.add_subplot(111, projection="3d")
+
+    # Choose a reasonable default colormap
+    # For electrostatics with symmetric bounds, a diverging map helps perception
+    cmap = "coolwarm" if elec_max_abs is not None else "viridis"
+
+    # Optional fixed symmetric scaling (useful for comparing across pH/salt)
+    if elec_max_abs is not None:
+        vlim = abs(float(elec_max_abs))
+        vmin, vmax = -vlim, vlim
+        norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+        sc = ax.scatter(coords[:, 0], coords[:, 1], coords[:, 2],
+                        c=values, s=point_size, alpha=alpha, cmap=cmap, norm=norm)
+    else:
+        sc = ax.scatter(coords[:, 0], coords[:, 1], coords[:, 2],
+                        c=values, s=point_size, alpha=alpha, cmap=cmap)
+
+    _set_equal_3d_axes(ax, coords)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_zlabel("z")
+    ax.view_init(elev=elev, azim=azim)
+
+    cbar = fig.colorbar(sc, ax=ax, shrink=0.75, pad=0.02)
+    cbar.set_label(prop_name)
+
+    Path(Path(out_path).parent).mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight")
+    plt.close(fig)
+
+
 
 def surfmap_from_pdb(params: Parameters, with_copyright: bool=True):
     """SURFMAP pipeline function to generate a 2D map from a PDB file. 
@@ -193,6 +332,41 @@ def surfmap_from_pdb(params: Parameters, with_copyright: bool=True):
         property = "bfactor" if tomap == "binding_sites" else tomap
         reslist, partlist_outfile = run_particles_mapping(shell=shell, pdb=params.pdbarg, tomap=property, outdir=params.outdir, res=params.resfile)
         junk_optional.add(element=[reslist, partlist_outfile])
+
+        # --- NEW: optional 3D scatter right after per-particle mapping ---
+        if params.plot3d:
+            try:
+                coords3d, values = _load_coords_and_values(partlist_outfile)
+
+                # Build a descriptive filename (include pH/salt when available)
+                labels = [params.pdb_id, property]
+                if params.ph is not None:
+                    labels.append(f"pH{params.ph:g}")
+                if params.salt is not None:
+                    labels.append(f"salt{params.salt:g}M")
+                outfile_3d = "_".join(labels) + "_3d.png"
+
+                out_path_3d = Path(params.outdir) / "plots_3d" / outfile_3d
+                elev, azim = params.plot3d_view
+
+                # Fix symmetric color scale for electrostatics if user provided a max
+                elec_max_abs = None
+                if property == "electrostatics" and params.elec_max_value is not None:
+                    elec_max_abs = float(abs(params.elec_max_value))
+
+                plot_3d_scatter(coords3d, values, out_path_3d,
+                                prop_name=property,
+                                point_size=params.plot3d_point_size,
+                                alpha=params.plot3d_alpha,
+                                elev=elev, azim=azim,
+                                dpi=300,
+                                elec_max_abs=elec_max_abs)
+
+                logger.info(f"Saved 3D scatter: {out_path_3d}")
+            except Exception as e:
+                # Don't fail the run if 3D plotting stumbles; report and continue
+                logger.warning(f"3D plotting skipped due to: {e}")
+        # --- end NEW ---
 
 
         step_index += 1

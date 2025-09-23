@@ -145,6 +145,33 @@ def get_args():
         help="If chosen, SURFMAP will be run on a Docker container (requires docker installed)."
     )
 
+    # --- 3D plotting options ---
+    parser.add_argument(
+        "--plot3d",
+        action="store_true",
+        help="If set, also generate 3D scatter plots of the surface points using matplotlib."
+    )
+    parser.add_argument(
+        "--plot3d-point-size",
+        type=float,
+        default=2.0,
+        help="Marker size for 3D scatter points (default: 2.0)."
+    )
+    parser.add_argument(
+        "--plot3d-alpha",
+        type=float,
+        default=0.9,
+        help="Marker transparency for 3D scatter points (default: 0.9)."
+    )
+    parser.add_argument(
+        "--plot3d-view",
+        type=float,
+        nargs=2,
+        metavar=("ELEV", "AZIM"),
+        default=(20.0, 35.0),
+        help="3D camera elevation and azimuth (default: 20, 35)."
+    )
+
     parser.add_argument(
         "-pqr",
         required=False,
@@ -206,6 +233,10 @@ class Parameters:
     - keep: bool  # True to keep intermediary files that are usually removed
     - docker: bool  # True to run SURFMAP on a docker container
     - outdir: Union[str, Path]  # path to the output directory
+    - plot3d: bool  # True to generate 3D scatter plots of the surface points using matplotlib
+    - plot3d_point_size: float  # Marker size for 3D scatter points (default: 2.0)
+    - plot3d_alpha: float  # Marker transparency for 3D scatter points (default: 0.9) 0.0 fully transparent to 1.0 fully opaque
+    - plot3d_view: Tuple[float, float]  # 3D camera elevation and azimuth (default: (20.0, 35.0)) in degrees (elev, azim), elev tilt up/down, azim rotate left/right
     - pqr: str=None  # path to a PQR file used for electrostatics calculation. Defaults to None
     - ff: str=CHARMM  # pdb2pqr force-field used for electrostatics calculation. One of the following: AMBER, CHARMM, PARSE, TYL06, PEOEPB, SWANSON. Defaults to CHARMM.
     - verbose: int=2  # Verbose level of the console log. 0 for silence, 1 for debug level, 2 for info level. Defaults to 2.
@@ -309,12 +340,20 @@ class Parameters:
         self.png: bool = args.png
         self.keep: bool = args.keep
         self.docker: bool = args.docker
+        # 3D plotting toggles
+        self.plot3d: bool = args.plot3d
+        self.plot3d_point_size: float = args.plot3d_point_size
+        self.plot3d_alpha: float = args.plot3d_alpha
+        # view as (elev, azim)
+        self.plot3d_view = tuple(args.plot3d_view) if isinstance(args.plot3d_view, (list, tuple)) else (20.0, 35.0)
+
         # ionic strength (only meaningful for electrostatics)
         self.salt = args.salt if self.ppttomap == "electrostatics" else None
         self._check_salt()
+        # target pH (only meaningful for electrostatics)
         self.ph = args.ph if self.ppttomap == "electrostatics" else None
         self._check_ph()
-        
+
         # define and create output directory if not exists
         self.DEFAULT_OUTDIR_BASENAME = "output_SURFMAP_{}_{}"
         self._set_outdir(args=args)
