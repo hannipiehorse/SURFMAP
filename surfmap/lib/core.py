@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from typing import Tuple, Union
 import os
-import numpy
+import numpy as np
 # Headless backend so this works inside Docker with no GUI
 import matplotlib
 matplotlib.use("Agg")
@@ -168,11 +168,16 @@ def _load_coords_and_values(particles_file: Union[str, Path]):
             return None
 
     # 1) Try CSV with header, then whitespace with header
-    data = _try_read(",", True) or _try_read(None, True)
+    data = _try_read(",", True)
+    if data is None or (hasattr(data, "shape") and data.shape == ()):
+        data = _try_read(None, True)
 
     # 2) If no header parse worked, try without names
     if data is None or (hasattr(data, "shape") and data.shape == ()):
-        data = _try_read(",", False) or _try_read(None, False)
+        data = _try_read(",", False)
+        if data is None or (hasattr(data, "shape") and data.shape == ()):
+            data = _try_read(None, False)
+
 
     if data is None:
         raise ValueError(f"Could not parse particle file: {particles_file}")
@@ -190,8 +195,10 @@ def _load_coords_and_values(particles_file: Union[str, Path]):
         ys = _get(["y", "ys", "coordy"])
         zs = _get(["z", "zs", "coordz"])
         # value column: try common names then fallback to the last column
-        vals = (_get(["value", "val", "prop", "property", "electrostatics", "bfactor"])
-                or data[data.dtype.names[-1]])
+        vals = _get(["value", "val", "prop", "property", "electrostatics", "bfactor"])
+        if vals is None:
+            vals = data[data.dtype.names[-1]]
+
 
         if xs is None or ys is None or zs is None:
             # fallback: take first 3 numeric columns as XYZ
@@ -219,6 +226,184 @@ def _load_coords_and_values(particles_file: Union[str, Path]):
 
     return coords, values
 
+def _coords_vals_from_partlist(partlist_path: Union[str, Path],
+                               shell_pdb_path: Union[str, Path]):
+    """Use shell PDB for XYZ and partlist 'value' (3rd column) for colors."""
+    partlist_path = Path(partlist_path)
+    shell_pdb_path = Path(shell_pdb_path)
+
+    # 1) coords from shell PDB (ATOM/HETATM x,y,z; B-factor ignored here)
+    xs, ys, zs = [], [], []
+    with open(shell_pdb_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.startswith(("ATOM  ", "HETATM")) and len(line) >= 54:
+                try:
+                    x = float(line[30:38]); y = float(line[38:46]); z = float(line[46:54])
+                except Exception:
+                    continue
+                xs.append(x); ys.append(y); zs.append(z)
+
+    if not xs:
+        raise ValueError(f"No coordinates parsed from shell PDB: {shell_pdb_path}")
+
+    coords = np.column_stack([xs, ys, zs]).astype(float)
+
+    # 2) values from partlist third column (skip header if present)
+    vals = []
+    with open(partlist_path, "r", encoding="utf-8") as f:
+        for line in f:
+            s = line.strip()
+            if not s or not any(ch.isdigit() for ch in s):
+                # likely header/blank
+                continue
+            parts = s.replace(",", " ").split()
+            if len(parts) < 3:
+                continue
+            try:
+                v = float(parts[2])
+            except Exception:
+                continue
+            vals.append(v)
+
+    if not vals:
+        raise ValueError(f"Could not parse values from partlist: {partlist_path}")
+
+    vals = np.asarray(vals, float).ravel()
+
+    # align by index length
+    n = min(coords.shape[0], vals.shape[0])
+    coords = coords[:n, :]
+    vals = vals[:n]
+    return coords, vals
+
+def _coords_vals_from_shell_pdb(pdb_path: Union[str, Path]):
+    """
+    Read coordinates and per-particle values from a shell PDB.
+    The value is taken from the B-factor column (columns 61-66 in PDB format).
+    Returns: coords (N,3), values (N,)
+    """
+    xs, ys, zs, vals = [], [], [], []
+    with open(pdb_path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            if not (line.startswith("ATOM") or line.startswith("HETATM")):
+                continue
+            try:
+                x = float(line[30:38])
+                y = float(line[38:46])
+                z = float(line[46:54])
+                b = float(line[60:66])  # B-factor – APBS values are written here
+            except Exception:
+                continue
+            xs.append(x); ys.append(y); zs.append(z); vals.append(b)
+
+    if not xs:
+        raise ValueError(f"No ATOM/HETATM records parsed from shell PDB: {pdb_path}")
+
+    coords = np.column_stack([xs, ys, zs]).astype(float)
+    values = np.asarray(vals, dtype=float)
+    return coords, values
+
+def _coords_from_shell_pdb(pdb_path: Union[str, Path]):
+    """
+    Read only XYZ coordinates from the shell PDB (ignore values).
+    Returns: coords (N,3) float array, in the same order as the atoms/particles.
+    """
+    xs, ys, zs = [], [], []
+    with open(pdb_path, "r", encoding="utf-8", errors="ignore") as fh:
+        for line in fh:
+            if not (line.startswith("ATOM") or line.startswith("HETATM")):
+                continue
+            try:
+                x = float(line[30:38]); y = float(line[38:46]); z = float(line[46:54])
+            except Exception:
+                parts = line.split()
+                if len(parts) < 9:
+                    continue
+                x = float(parts[6]); y = float(parts[7]); z = float(parts[8])
+            xs.append(x); ys.append(y); zs.append(z)
+    coords = np.column_stack([xs, ys, zs]).astype(float)
+    return coords
+
+
+def _values_from_partlist(partlist_path: Union[str, Path]):
+    """
+    Read one numeric 'value' per particle from the partlist.
+    The file may be CSV or whitespace-delimited and usually has a header:
+        phi  theta  value  resnb  restype  chain
+    Strategy:
+      1) Try structured read with names=True; if a column named 'value'
+         exists (any case), use it.
+      2) Else, pick the last numeric column from the structured array.
+      3) Else, read as plain numeric matrix and take the last column.
+    """
+    p = str(partlist_path)
+
+    # ---- Try structured with names (CSV then whitespace) ----
+    for delimiter in (",", None):
+        try:
+            arr = np.genfromtxt(
+                p,
+                delimiter=delimiter,
+                names=True,
+                dtype=None,        # infer types; mixed dtypes OK
+                autostrip=True,
+                comments="#",
+                encoding="utf-8",
+                invalid_raise=False,
+            )
+        except Exception:
+            arr = None
+
+        if arr is not None and getattr(arr, "dtype", None) and arr.dtype.names:
+            names = list(arr.dtype.names)
+            lower = [n.lower() for n in names]
+
+            # 1) Prefer a column literally named 'value'
+            if "value" in lower:
+                vals = np.asarray(arr[names[lower.index("value")]], dtype=float).ravel()
+                if np.isfinite(vals).any():
+                    return vals
+
+            # 2) Otherwise, pick the last *numeric* column
+            numeric_cols = []
+            for name in names:
+                try:
+                    _ = np.asarray(arr[name], dtype=float)
+                    numeric_cols.append(name)
+                except Exception:
+                    pass
+            if numeric_cols:
+                last_num = numeric_cols[-1]
+                vals = np.asarray(arr[last_num], dtype=float).ravel()
+                if np.isfinite(vals).any():
+                    return vals
+            # fall through to plain numeric
+
+    # ---- Plain numeric matrix (CSV then whitespace) ----
+    for delimiter in (",", None):
+        try:
+            mat = np.genfromtxt(
+                p,
+                delimiter=delimiter,
+                dtype=float,
+                autostrip=True,
+                comments="#",
+                invalid_raise=False,
+            )
+        except Exception:
+            mat = None
+
+        if mat is None:
+            continue
+        mat = np.asarray(mat)
+        if mat.ndim == 1:
+            mat = mat.reshape(1, -1)
+        if mat.shape[1] >= 1:
+            vals = np.asarray(mat[:, -1], dtype=float).ravel()
+            if np.isfinite(vals).any():
+                return vals
+
+    raise ValueError(f"Could not parse values from partlist: {p}")
 
 def _set_equal_3d_axes(ax, coords):
     """Make the 3D axes use the same scale so the protein doesn't look squashed."""
@@ -236,7 +421,8 @@ def plot_3d_scatter(coords, values, out_path,
                     point_size=2.0, alpha=0.9,
                     elev=20.0, azim=35.0,
                     dpi=300,
-                    elec_max_abs=None):
+                    elec_max_abs=None, 
+                    cmap_name="viridis"):
     """
     Minimal, robust 3D scatter that works headless.
     - coords: (N,3)
@@ -253,15 +439,13 @@ def plot_3d_scatter(coords, values, out_path,
     fig = plt.figure(figsize=(6, 6), dpi=dpi)
     ax = fig.add_subplot(111, projection="3d")
 
-    # Choose a reasonable default colormap
-    # For electrostatics with symmetric bounds, a diverging map helps perception
-    cmap = "coolwarm" if elec_max_abs is not None else "viridis"
+    # choose colormap
+    cmap = plt.get_cmap(cmap_name)
 
-    # Optional fixed symmetric scaling (useful for comparing across pH/salt)
+    # electrostatics: symmetric around 0 if a max was provided; center at 0
     if elec_max_abs is not None:
         vlim = abs(float(elec_max_abs))
-        vmin, vmax = -vlim, vlim
-        norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+        norm = mcolors.TwoSlopeNorm(vmin=-vlim, vcenter=0.0, vmax=+vlim)
         sc = ax.scatter(coords[:, 0], coords[:, 1], coords[:, 2],
                         c=values, s=point_size, alpha=alpha, cmap=cmap, norm=norm)
     else:
@@ -333,40 +517,82 @@ def surfmap_from_pdb(params: Parameters, with_copyright: bool=True):
         reslist, partlist_outfile = run_particles_mapping(shell=shell, pdb=params.pdbarg, tomap=property, outdir=params.outdir, res=params.resfile)
         junk_optional.add(element=[reslist, partlist_outfile])
 
-        # --- NEW: optional 3D scatter right after per-particle mapping ---
-        if params.plot3d:
-            try:
-                coords3d, values = _load_coords_and_values(partlist_outfile)
 
-                # Build a descriptive filename (include pH/salt when available)
+        # --- 3D scatter (property-aware source of values) ---
+        if params.plot3d:
+            logger.info("Attempting 3D plot for property '%s'…", property)
+            try:
+                # Decide how to get values:
+                # - electrostatics: use the APBS-enriched shell PDB (B-factor holds the potential)
+                # - others (WW, KD, stickiness, cv, bfactor): use the per-particle list file
+                if property == "electrostatics":
+                    coords3d, values = _coords_vals_from_shell_pdb(shell)
+                else:
+                    # NOTE: pass the shell PDB path as the second argument
+                    coords3d, values = _coords_vals_from_partlist(partlist_outfile, shell)
+
+                # Basic sanity and cleaning
+                coords3d = np.asarray(coords3d, float)
+                values   = np.asarray(values, float).ravel()
+                n = min(coords3d.shape[0], values.shape[0])
+                coords3d = coords3d[:n, :]
+                values   = values[:n]
+
+                logger.debug("Before filter: coords=%s, values=%s",
+                             coords3d.shape, values.shape)
+                logger.debug("values stats: finite=%d, nan=%d, min=%s, max=%s",
+                            int(np.isfinite(values).sum()),
+                            int(np.isnan(values).sum()),
+                            (np.nanmin(values) if values.size else "NA"),
+                            (np.nanmax(values) if values.size else "NA"))
+
+                # Filter NaN/inf rows
+                ok = np.isfinite(coords3d).all(axis=1) & np.isfinite(values)
+                coords3d = coords3d[ok]
+                values   = values[ok]
+                logger.info("3D plotting: %d points after filtering", coords3d.shape[0])
+
+                if coords3d.shape[0] == 0:
+                    raise ValueError("No finite points to plot (coords/values all NaN/inf?).")
+
+                # Build output filename
                 labels = [params.pdb_id, property]
                 if params.ph is not None:
                     labels.append(f"pH{params.ph:g}")
                 if params.salt is not None:
                     labels.append(f"salt{params.salt:g}M")
                 outfile_3d = "_".join(labels) + "_3d.png"
-
                 out_path_3d = Path(params.outdir) / "plots_3d" / outfile_3d
-                elev, azim = params.plot3d_view
 
-                # Fix symmetric color scale for electrostatics if user provided a max
-                elec_max_abs = None
-                if property == "electrostatics" and params.elec_max_value is not None:
-                    elec_max_abs = float(abs(params.elec_max_value))
+                # Camera view
+                elev, azim = params.plot3d_view if params.plot3d_view else (20.0, 35.0)
 
-                plot_3d_scatter(coords3d, values, out_path_3d,
-                                prop_name=property,
-                                point_size=params.plot3d_point_size,
-                                alpha=params.plot3d_alpha,
-                                elev=elev, azim=azim,
-                                dpi=300,
-                                elec_max_abs=elec_max_abs)
+                # Color mapping consistent with our plan
+                if property == "electrostatics":
+                    cmap_name = "RdBu_r"
+                    elec_max_abs = float(abs(params.elec_max_value)) if params.elec_max_value is not None else None
+                else:
+                    cmap_name = "viridis"
+                    elec_max_abs = None
 
-                logger.info(f"Saved 3D scatter: {out_path_3d}")
+                plot_3d_scatter(
+                    coords3d, values, out_path_3d,
+                    prop_name=property,
+                    point_size=params.plot3d_point_size,
+                    alpha=params.plot3d_alpha,
+                    elev=elev, azim=azim,
+                    dpi=300,
+                    elec_max_abs=elec_max_abs,
+                    cmap_name=cmap_name,
+                )
+                logger.info("Saved 3D scatter: %s", out_path_3d)
+
             except Exception as e:
-                # Don't fail the run if 3D plotting stumbles; report and continue
-                logger.warning(f"3D plotting skipped due to: {e}")
-        # --- end NEW ---
+                logger.warning("3D plotting skipped due to: %s", e)
+        # --- end 3D scatter ---
+
+
+
 
 
         step_index += 1
