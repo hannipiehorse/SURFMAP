@@ -1,15 +1,35 @@
-**/*.py[cod]
-**/__pycache__/
-**/*io.mc
-APBS*
-# MSMS
-Dockerfile
-example/output**
-**.Rmd
-.vscode
-.env
+# Python build/cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.so
+
+# Python/R environments
+.venv/
+.env/
+.Rproj.user/
 .Rhistory
-**.egg-info
-# SurfMap artifacts
-outputs/
+.Rapp.history
+.RData
+
+# Local runs & generated outputs
 surfmap_runs/
+output_SURFMAP_*/
+**/maps/
+**/matrices/
+**/smoothed_matrices/
+**/plots_3d/
+**/points_3d/
+**/shells/
+**/tmp-elec/
+**/palettes/
+**/parameters.log
+io.mc
+
+# Large inputs not meant for git
+*.pdb
+*.cif
+
+# OS/editor
+.DS_Store
+.vscode/

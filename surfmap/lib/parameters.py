@@ -172,6 +172,14 @@ def get_args():
         help="3D camera elevation and azimuth (default: 20, 35)."
     )
 
+    # --- CSV export of 3D points ---
+    # If set, we’ll write a CSV with columns: x,y,z,value
+    parser.add_argument(
+        "--csv3d",
+        action="store_true",
+        help="Also write a CSV with all 3D points (columns: x,y,z,value)."
+    )
+
     parser.add_argument(
         "-pqr",
         required=False,
@@ -346,6 +354,9 @@ class Parameters:
         self.plot3d_alpha: float = args.plot3d_alpha
         # view as (elev, azim)
         self.plot3d_view = tuple(args.plot3d_view) if isinstance(args.plot3d_view, (list, tuple)) else (20.0, 35.0)
+        # CSV export toggle for 3D points
+        self.csv3d: bool = args.csv3d
+
 
         # ionic strength (only meaningful for electrostatics)
         self.salt = args.salt if self.ppttomap == "electrostatics" else None

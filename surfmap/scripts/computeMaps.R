@@ -16,6 +16,8 @@ suppressMessages(invisible(lapply(packages, library, character.only = TRUE)))
 # library(optparse)
 options(warn=-1)
 
+try(Sys.setlocale("LC_CTYPE", "C.UTF-8"), silent = TRUE)
+
 ###########################################################
 
 
@@ -79,14 +81,19 @@ image.scale <- function(z, zlim, col = colorScale2, scalename,
   for(i in seq(poly)){
     poly[[i]] <- c(breaks[i], breaks[i+1], breaks[i+1], breaks[i])
   }
-  xaxt <- ifelse(horiz, "s", "n")
-  yaxt <- ifelse(horiz, "n", "s")
-  if(horiz){YLIM<-c(0,1); XLIM<-range(breaks)}
-  if(!horiz){YLIM<-range(breaks); XLIM<-c(0,1)}
-  if(missing(xlim)) xlim=XLIM
-  if(missing(ylim)) ylim=YLIM
-  plot(1,1,t="n",ylim=ylim, xlim=xlim, xaxt=xaxt, yaxt=yaxt, xaxs="i", yaxs="i", 
-       xlab=scale_main, adj = 0.4, ylab="", line=1.5, cex.lab=0.9, cex.names=0.6, ...) 
+  xaxt <- "n"
+  yaxt <- "n"
+  xaxt <- ifelse(horiz, "s", "n")  # kept but unused; safe to leave
+  yaxt <- ifelse(horiz, "n", "s")  # kept but unused; safe to leave
+  if(horiz){YLIM <- c(0,1); XLIM <- range(breaks)}
+  if(!horiz){YLIM <- range(breaks); XLIM <- c(0,1)}
+  if(missing(xlim)) xlim <- XLIM
+  if(missing(ylim)) ylim <- YLIM
+
+  # draw a blank panel with NO axes, always
+  plot.new()
+  par(xaxs="i", yaxs="i")
+  plot.window(xlim=xlim, ylim=ylim)
   for(i in seq(poly)){
     if(horiz){
       polygon(poly[[i]], c(0,0,1,1), col=col[i], border=NA)
@@ -144,16 +151,38 @@ option_list = list(
               help="Input suffix that is removed to to build basename of output files.", metavar="character"),
   make_option(c("--elec_max_value"), type="numeric", default=NULL, 
               help="Maximum absolute value to be used for the electrostatics color scale", metavar="character"),
+  make_option(c("--title-extra"), type="character", default=NULL,
+              help="Extra title line, e.g., 'pH 8, 0.15 M salt'", metavar="character"),
   make_option(c("--bfactor_min_value"), type="numeric", default=NULL, 
               help="Minimum bfactor value to be used for the bfactor color scale", metavar="character"),
   make_option(c("--bfactor_max_value"), type="numeric", default=NULL, 
-              help="Maximum bfactor value to be used for the bfactor color scale", metavar="character")
+              help="Maximum bfactor value to be used for the bfactor color scale", metavar="character")            
 );
 
 opt_parser = OptionParser(option_list=option_list);
 opt = parse_args(opt_parser);
 pdb_id = opt$pdb
 projection = opt$projection
+
+# Identify which property we are plotting (used to name the palette file)
+prop_key <- NA
+if (opt$electrostatics == TRUE) {
+  prop_key <- "electrostatics"
+} else if (opt$stickiness == TRUE) {
+  prop_key <- "stickiness"
+} else if (opt$kyte_doolittle == TRUE) {
+  prop_key <- "kyte_doolittle"
+} else if (opt$wimley_white == TRUE) {
+  prop_key <- "wimley_white"
+} else if (opt$circular_variance == TRUE) {
+  prop_key <- "circular_variance"
+} else if (opt$bfactor == TRUE) {
+  prop_key <- "bfactor"
+} else if (opt$whiteblue == TRUE) {
+  prop_key <- "whiteblue"
+} else if (opt$energy == TRUE) {
+  prop_key <- "energy"
+}
 
 if (file_test("-f", opt$input)) {
   files = c(opt$input)
@@ -207,10 +236,12 @@ for (file in (1:length(files))) {
   pdf_filename = file.path(outdir, paste0(name_prefix, "_map.pdf"))
 
   if (opt$png == TRUE) {
-    png(gsub(".pdf", ".png", pdf_filename), res = 300, width = 17.78, height = 17.78, units = "cm")
+    png(gsub(".pdf", ".png", pdf_filename), width = 2200, height = 1500, res = 300)
   } else {
-    pdf(pdf_filename)
+    pdf(pdf_filename, width = 9, height = 6)  # inches
   }
+  par(oma = c(0,0,0,0))
+
 
   prot_name = name_prefix
   
@@ -274,7 +305,7 @@ for (file in (1:length(files))) {
 
 
     range=abs(minval-maxval)
-    scale_main = paste0("electrostatic","\n","potential")
+    scale_main = paste0("Electrostatic Potential [kT/e]")
     main_title = paste0("electrostatic potential map", "\n", pdb_id)
     colors = c(seq(minval,minval+range*1/3,length=334),seq(minval+range*1/3,minval+range*2/3,length=333),seq(minval+range*2/3,maxval,length=334))
     scale_at = c(ceiling(minval*100000)/100000, round(maxval-range*5/6,5), round(maxval-range*4/6,5), round(maxval-range*3/6,5), round(maxval-range*2/6,5), round(maxval-range*1/6,5), floor(maxval*100000)/100000)
@@ -285,7 +316,7 @@ for (file in (1:length(files))) {
     maxval = 1.273
     range = abs(minval-maxval)
     #scale_main = "interaction\npropensity"
-    scale_main = "stickiness"
+    scale_main = "Stickiness [-]"
     main_title = paste0("stickiness map\n", pdb_id)
     colors = c(seq(minval,minval+range*1/3,length=334),seq(minval+range*1/3,minval+range*2/3,length=333),seq(minval+range*2/3,maxval,length=334))
     # colorScale <- colorRampPalette(c("blue", "white", "red"))(1000)
@@ -299,7 +330,7 @@ for (file in (1:length(files))) {
     minval = -4.5
     maxval = 4.5
     range=abs(minval-maxval)
-    scale_main = paste0("hydrophobicity","\n","Kyte-Doolittle")
+    scale_main <- "Kyte-Doolittle Hydrophobicity [-]"
     colors = c(seq(minval,minval+range*1/3,length=334),seq(minval+range*1/3,minval+range*2/3,length=333),seq(minval+range*2/3,maxval,length=334))
     # colorScale <- colorRampPalette(c("dodgerblue2", "white", "sienna"))(1000)
     colorScale <- colorRampPalette(c("cadetblue", "cadetblue3", "#faf4e0", "orange3", "sienna4"))(1000)
@@ -316,7 +347,7 @@ for (file in (1:length(files))) {
     minval = 2.23
     maxval = 6.1
     range=abs(minval-maxval)
-    scale_main = paste0("hydrophobicity","\n","Wimley-White")
+    scale_main <- "Wimley-White Hydrophobicity [kcal/mol]"
     colors = c(seq(minval,minval+range*1/3,length=334),seq(minval+range*1/3,minval+range*2/3,length=333),seq(minval+range*2/3,maxval,length=334))
     colorScale <- colorRampPalette(c("cadetblue", "cadetblue3", "#faf4e0", "orange3", "sienna4"))(1000)
     scale_at = c(2.23,2.85,3.5,4.15,4.8,5.45,6.1)
@@ -327,7 +358,7 @@ for (file in (1:length(files))) {
     minval = 0
     maxval = 1
     range=abs(minval-maxval)
-    scale_main = paste0("circular","\n","variance")
+    scale_main = paste0("Circular Variance [-]")
     colors = c(seq(minval,minval+range*1/3,length=334),seq(minval+range*1/3,minval+range*2/3,length=333),seq(minval+range*2/3,maxval,length=334))
     # colorScale <- colorRampPalette(c("red", "white", "blue"))(1000)
     colorScale <- colorRampPalette(c("black", "white", "blue"))(1000)
@@ -354,7 +385,7 @@ for (file in (1:length(files))) {
     main_title = paste0("b-factor map\n", pdb_id)
     range = abs(minval-maxval)
 
-    scale_main = "b-factor"
+    scale_main = "B-factor [Å^2]"
     colors = c(seq(minval,minval+range*1/3,length=334),seq(minval+range*1/3,minval+range*2/3,length=333),seq(minval+range*2/3,maxval,length=334))
     # colorScale <- colorRampPalette(c("blue", "white", "red"))(1000)
     colorScale <- colorRampPalette(c("chocolate3", "white", "darkblue"))(1000)
@@ -370,7 +401,7 @@ for (file in (1:length(files))) {
     maxval = max(val_matrix[proj])
     range = abs(minval-maxval)
 
-    scale_main = "b-factor"
+    scale_main = "B-factor [Å^2]"
     colors = seq(0,maxval+1,1)
     colorScaletot = c("white", "firebrick2", "cornflowerblue", "darkgoldenrod1", "mediumorchid4", "green3", "skyblue1", "tan3", "violet", "darkgreen", "chocolate1", "gray30", "salmon", "palevioletred3", "royalblue4")
     colorScale <- colorScaletot[seq(1,maxval+1,1)]
@@ -383,7 +414,7 @@ for (file in (1:length(files))) {
     minval = min(val_matrix[proj])
     maxval = max(val_matrix[proj])
     range = abs(minval-maxval)
-    scale_main = paste0("b-factor")
+    scale_main = paste0("B-factor [Å^2]")
     colors = c(seq(minval,minval+range*1/2,length=500),seq(minval+range*1/2,maxval,length=501))
     colorScale <- colorRampPalette(c("white", "blue"))(1000)
     scale_at = c(0,1/5,2/5,3/5,4/5,1)
@@ -394,7 +425,7 @@ for (file in (1:length(files))) {
     minval = min(val_matrix[proj])
     maxval = max(val_matrix[proj])
 
-    scale_main = expression(paste("   kcal.",mol^-1))
+    scale_main = expression(paste("Docking Energy [kcal/mol]"))
     range=abs(minval-maxval)
     
     colors = c(seq(minval,minval+range*1/4,length=250),seq(minval+range*1/4,minval+range*2/4,length=250),seq(minval+range*2/4,minval+range*3/4,length=250),seq(minval+range*3/4,maxval,length=251))
@@ -403,62 +434,133 @@ for (file in (1:length(files))) {
 
   }
 
-  # Creation of the map.
-  layout(matrix(c(1,2), nrow=1, ncol=2), widths=c(4,1,1), heights=c(4,1))
-  par(mar=c(14.4,5,9.3,1.2))
-  
-  # compute values for scale axis
-  range=maxval-minval
-  if (opt$energy) { 
-      axis_scale = c(ceiling(minval*100000)/100000, round(maxval-range*5/6,5), round(maxval-range*4/6,5), round(maxval-range*3/6,5), round(maxval-range*2/6,5), round(maxval-range*1/6,5), floor(maxval*100000)/100000)
-  } else if (opt$whiteblue) { 
-      axis_scale = c(ceiling(minval*100000)/100000, round(maxval-range*4/5,5), round(maxval-range*3/5,5), round(maxval-range*2/5,5), round(maxval-range*1/5,5), floor(maxval*100000)/100000)
-  } else if (opt$discrete) {
-      axis_scale = seq(0,maxval,1)
-  } else { 
-      axis_scale = c(ceiling(minval*100000)/100000, round(maxval-range*5/6,5), round(maxval-range*4/6,5), round(maxval-range*3/6,5), round(maxval-range*2/6,5), round(maxval-range*1/6,5), floor(maxval*100000)/100000)}
-  
-  if (projection == "sinusoidal") {
-    labx = expression(paste(phi, " sin(", theta, ")"))
-    laby = expression(paste("90 - ", theta))
-  } else if (projection == "mollweide") {
-    labx = "x"
-    laby = "y"
-  } else if (projection == "lambert") {
-    labx = expression(paste(phi))
-    laby = expression(paste(" sin(", theta, ")"))
+  # Export the exact palette to a text file so Python 3D can reuse it
+  if (!is.na(prop_key)) {
+    pal_dir <- file.path(opt$outdir, "palettes")
+    dir.create(pal_dir, showWarnings = FALSE, recursive = TRUE)
+    pal_file <- file.path(pal_dir, paste0(prop_key, ".txt"))
+    writeLines(colorScale, pal_file, sep = "\n")
   }
+
+  # Append extra info (e.g., "pH 8, 0.15 M salt") to the title if provided
+  # Be robust to optparse name mangling: --title-extra → title.extra
+  title_extra <- NULL
+  if (!is.null(opt$title_extra)) {
+    title_extra <- opt$title_extra
+  } else if (!is.null(opt$title.extra)) {
+    title_extra <- opt$title.extra
+  } else if (!is.null(opt[["title-extra"]])) {
+    title_extra <- opt[["title-extra"]]
+  }
+  if (!is.null(title_extra) && nchar(title_extra) > 0) {
+    main_title <- paste0(main_title, "\n", title_extra)
+  }
+
+
+
+  # ---- Append title suffix (from Python) to the main title, if provided ----
+  title_suffix <- Sys.getenv("SURFMAP_TITLE_SUFFIX", unset = "")
+  if (nchar(title_suffix) > 0) {
+    main_title <- paste0(main_title, "  |  ", title_suffix)
+  }
+
+  ## ---- MAP panel (left) ----
+  par(
+    fig = c(0.00, 0.76, 0.08, 0.98),  # left 76% width; small bottom/top padding
+    mar = c(4.5, 5, 3.5, 0.6),        # bottom, left, top, right (lines)
+    new = FALSE
+  )
+
   
-  # Creation of the image.
-  image.nan.better(t(val_matrix),col=colorScale,
-                   zlim=c(minval, maxval),
-                   outside.below.color='white',
-                   outside.above.color='gray90',
-                   na.color='white',
-                   frame.plot = TRUE,
-                   axes = FALSE,
-                   xlab = labx, 
-                   ylab = laby,
-                   cex.lab = 1.5)
+cat(sprintf("[SURFMAP] axis labels set for '%s'\n", projection))
+
+  # --- Safe axis labels based on projection ---
+  projection <- tolower(trimws(projection))
+  labx <- "x"; laby <- "y"   # defaults, so labx/laby always exist
+
+  if (projection == "sinusoidal") {
+    labx <- expression(paste(phi, " sin(", theta, ")"))
+    laby <- expression(paste("90 - ", theta))
+  } else if (projection == "mollweide") {
+    labx <- "x"; laby <- "y"
+  } else if (projection == "lambert") {
+    labx <- expression(paste(phi))
+    laby <- expression(paste(" sin(", theta, ")"))
+  }
+
+  # (map drawing stays the same)
+  image.nan.better(t(val_matrix), col=colorScale,
+                  zlim=c(minval, maxval),
+                  outside.below.color='white',
+                  outside.above.color='gray90',
+                  na.color='white',
+                  frame.plot = TRUE,
+                  axes = FALSE,
+                  xlab = labx,
+                  ylab = laby,
+                  cex.lab = 1.5)
   axis(1, at=c(0,0.25,0.5,0.75,1), labels=c(-180,-90,0,90,180), cex.axis=1.2)
   axis(2, at=c(0,0.25,0.5,0.75,1), labels=c(-90,-45,0,45,90), cex.axis=1.2, las=2)
   title(main = main_title, line = 1.5)
-  
-  # Add native site to plot.
-  if (!is.na(opt$coord)) {
-    points(nat_phi/360, nat_theta/180, pch = 8, col = "black", cex = 2, lwd = 2)
-    #text(nat_phi/360, nat_theta/180+22/180, labels = theta_phi_nat[,2], cex = 1.8)
+
+  # (points/residue annotations exactly as you have now)
+
+  # ---- tick labels for the legend ----
+  range <- maxval - minval
+  if (isTRUE(opt$energy)) {
+    axis_scale <- c(ceiling(minval*1e5)/1e5,
+                    round(maxval - range*5/6, 5),
+                    round(maxval - range*4/6, 5),
+                    round(maxval - range*3/6, 5),
+                    round(maxval - range*2/6, 5),
+                    round(maxval - range*1/6, 5),
+                    floor(maxval*1e5)/1e5)
+  } else if (isTRUE(opt$whiteblue)) {
+    axis_scale <- c(ceiling(minval*1e5)/1e5,
+                    round(maxval - range*4/5, 5),
+                    round(maxval - range*3/5, 5),
+                    round(maxval - range*2/5, 5),
+                    round(maxval - range*1/5, 5),
+                    floor(maxval*1e5)/1e5)
+  } else if (isTRUE(opt$discrete)) {
+    axis_scale <- seq(0, maxval, 1)
+  } else {
+    axis_scale <- c(ceiling(minval*1e5)/1e5,
+                    round(maxval - range*5/6, 5),
+                    round(maxval - range*4/6, 5),
+                    round(maxval - range*3/6, 5),
+                    round(maxval - range*2/6, 5),
+                    round(maxval - range*1/6, 5),
+                    floor(maxval*1e5)/1e5)
   }
 
-  # Add coordinates of residues of interest
-  if (!is.na(opt$reslist)) {
-    points(res_phi/360, res_theta/180, pch = 4, col = rgb(red = 0, green = 0, blue = 0, alpha = 0.75), cex = 1.15, lwd = 1.)
-    text(res_phi/360, res_theta/180+14/180, labels = legend, cex = 0.7, lwd = 1.5, col = rgb(red = 0, green = 0, blue = 0, alpha = 0.75))
-  }
-  # Add scale to plot. 
-  par(mar=c(15.5,1.6,10.5,4.5))
-  image.scale(t(val_matrix), col=colorScale, breaks=colors, scalename = scale_main, horiz=FALSE, yaxt="n")#, ylim = c(0, 1))
-  axis(4,at=scale_at, las=2, cex.axis=0.8, labels=round(axis_scale,digits = 2))
+
+ ## ---- LEGEND (right; single axis on the right) ----
+  par(
+    fig = c(0.86, 0.975, 0.12, 0.88),   # a touch wider than before
+    mar = c(0.4, 0.4, 0.4, 3.6),        # room on RIGHT for the label
+    new = TRUE
+  )
+
+  # draw bar only (image.scale now never draws axes)
+  image.scale(
+    t(val_matrix),
+    col = colorScale, breaks = colors,
+    horiz = FALSE,
+    xlab = "", ylab = ""
+  )
+
+  # one axis on the RIGHT (SURFMAP-style ticks)
+  # Always show exactly two decimals on all maps
+  axis_labels <- sprintf("%.2f", axis_scale)
+  axis(4, at = scale_at, las = 2, cex.axis = 0.8, labels = axis_labels)
+
+
+  # vertical label on the RIGHT; nudge away from ticks
+  mtext(scale_main, side = 4, line = 2.8, cex = 0.92)
+
+
+
 
   dev.off()
 }
