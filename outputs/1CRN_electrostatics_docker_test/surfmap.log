@@ -1,0 +1,24 @@
+2025-09-15 09:21:06 — INFO — surfmap.lib.core.surfmap_from_pdb ........................... SURFACE MAPPING OF THE ELECTROSTATICS PROPERTY
+2025-09-15 09:21:06 — INFO — surfmap.lib.core.surfmap_from_pdb ........................... Step 1: computing a shell around the protein surface
+2025-09-15 09:21:06 — DEBUG — surfmap.tools.compute_shell.run .............................. Convert pdb to xyzr format (expected MSMS input)
+2025-09-15 09:21:06 — DEBUG — surfmap.tools.compute_shell.run .............................. Running MSMS command: /surfmap/surfmap/utils/MSMS/msms -if /output/shells/1CRN.xyzr -of /output/shells/1CRN
+2025-09-15 09:21:06 — DEBUG — surfmap.tools.compute_shell.run .............................. Convert MSMS .vert file into CSV format
+2025-09-15 09:21:06 — DEBUG — surfmap.tools.compute_shell.run .............................. Convert CSV into PDB format
+2025-09-15 09:21:06 — INFO — surfmap.lib.core.surfmap_from_pdb ........................... Step 2: computing electrostatics potential
+2025-09-15 09:21:06 — DEBUG — surfmap.tools.compute_electrostatics.run .............................. Convert PDB to PQR format
+2025-09-15 09:21:07 — DEBUG — surfmap.tools.compute_electrostatics.run .............................. Running inputgen command: python3 /surfmap/APBS/share/apbs/tools/manip/inputgen.py --method=auto /output/tmp-elec/1CRN.pqr
+2025-09-15 09:21:07 — DEBUG — surfmap.tools.compute_electrostatics.run .............................. Editing generated inputgen file: /output/tmp-elec/1CRN.in
+2025-09-15 09:21:07 — DEBUG — surfmap.tools.compute_electrostatics.run .............................. Running APBS command: ['/surfmap/APBS/bin/apbs', '/output/tmp-elec/1CRN.in']
+2025-09-15 09:21:13 — DEBUG — surfmap.tools.compute_electrostatics.run .............................. Running multivalue command: ['/surfmap/APBS/share/apbs/tools/bin/multivalue', '/output/shells/1CRN.csv', '/output/tmp-elec/1CRN.pqr.dx', '/output/tmp-elec/1CRN.mult']
+2025-09-15 09:21:14 — DEBUG — surfmap.tools.compute_electrostatics.run .............................. Converting CSV to PDB file
+2025-09-15 09:21:14 — DEBUG — surfmap.tools.compute_electrostatics.run .............................. Removing APBS derived log file: /home/surfmap/io.mc
+2025-09-15 09:21:14 — INFO — surfmap.lib.core.surfmap_from_pdb ........................... Step 3: computing the property values and/or assign it to the shell particles
+2025-09-15 09:21:14 — DEBUG — surfmap.tools.SurfmapTools.run_particles_mapping .............................. Get dictionary of the PDB structure from /input/1CRN.pdb
+2025-09-15 09:21:14 — DEBUG — surfmap.tools.SurfmapTools.run_particles_mapping .............................. Get dictionary of the shell structure from /output/tmp-elec/1CRN_shell.pdb
+2025-09-15 09:21:14 — DEBUG — surfmap.tools.SurfmapTools.run_particles_mapping .............................. Retrieving the center of mass of the pdb structure
+2025-09-15 09:21:14 — INFO — surfmap.lib.core.surfmap_from_pdb ........................... Step 4: computing the 2D sinusoidal projection coordinates of each shell particle
+2025-09-15 09:21:14 — DEBUG — surfmap.lib.core.compute_coords_list .............................. Running the command: Rscript /surfmap/surfmap/scripts/computeCoordList.R -f /output/1CRN_electrostatics_partlist.out -s 5 -P sinusoidal -o /output
+2025-09-15 09:21:15 — INFO — surfmap.lib.core.surfmap_from_pdb ........................... Step 5: dividing the 2D projection into 72x36 cells and smoothing the values
+2025-09-15 09:21:15 — DEBUG — surfmap.lib.core.compute_matrix .............................. Running the command: Rscript /surfmap/surfmap/scripts/computeMatrices.R -i /output/coord_lists/1CRN_electrostatics_coord_list.txt -s 5 -P sinusoidal -o /output --suffix _coord_list.txt
+2025-09-15 09:21:16 — INFO — surfmap.lib.core.surfmap_from_pdb ........................... Step 6: computing the 2D map
+2025-09-15 09:21:16 — DEBUG — surfmap.lib.core.compute_map .............................. Running the command: Rscript /surfmap/surfmap/scripts/computeMaps.R -i /output/smoothed_matrices/1CRN_electrostatics_smoothed_matrix.txt --electrostatics -s 5 -p 1CRN -P sinusoidal -o /output --suffix _smoothed_matrix.txt --png

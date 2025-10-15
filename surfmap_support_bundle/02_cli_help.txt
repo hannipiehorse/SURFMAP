@@ -1,0 +1,76 @@
+usage: surfmap [-h] (-pdb PDB | -mat MAT | -v) -tomap TOMAP [-proj PROJ]
+               [-res RES] [-rad RAD] [-d D] [-s S]
+               [--elec-max-value ELEC_MAX_VALUE] [--salt SALT] [--ph PH]
+               [--bfactor-min-value BFACTOR_MIN_VALUE]
+               [--bfactor-max-value BFACTOR_MAX_VALUE] [--nosmooth] [--png]
+               [--keep] [--docker] [--plot3d]
+               [--plot3d-point-size PLOT3D_POINT_SIZE]
+               [--plot3d-alpha PLOT3D_ALPHA] [--plot3d-view ELEV AZIM]
+               [-pqr PQR] [-ff FF] [-verbose VERBOSE]
+
+options:
+  -h, --help            show this help message and exit
+  -pdb PDB              Path to a PDB file
+  -mat MAT              Input matrix. If the user gives an input matrix,
+                        SURFMAP will directly compute a map from it.
+  -v, --version         Print the current version of SURFMAP.
+  -tomap TOMAP          Specific key defining the feature to map. Accepted
+                        feature keys are: stickiness, kyte_doolittle,
+                        wimley_white, electrostatics, circular_variance,
+                        bfactor, binding_sites, all.
+  -proj PROJ            Type of projection. Accepted projection types are:
+                        flamsteed, mollweide, lambert. Defaults to flamsteed.
+  -res RES              Path to a file containing a list of residues to map on
+                        the projection. Expected format has the following
+                        space/tab separated column values: chainid resid
+                        resname
+  -rad RAD              Radius in Angstrom added to usual atomic radius (used
+                        for calculation solvent excluded surface). The higher
+                        the radius the smoother the surface. Defaults to 3.0
+  -d D                  Path to the output directory. Defaults to
+                        './output_SURFMAP_$pdb_$tomap' with $pdb and $tomap
+                        based on -pdb and -tomap given values
+  -s S                  Value defining the size of a grid cell. The value must
+                        be a multiple of 180 and can not exceed 20. Defaults
+                        to 5
+  --elec-max-value ELEC_MAX_VALUE
+                        Maximum value to be used for the electrostatics color
+                        scale. The value will be converted as an absolute
+                        value to make the scale symetric around 0. For
+                        instance, a value of 5.63 will scale the
+                        electrosctatics color values from -5.63 to 5.63.
+  --salt SALT           Monovalent salt concentration in mol/L for APBS ionic
+                        strength (e.g., 0.15). Only used for -tomap
+                        electrostatics.
+  --ph PH               Target pH for PDB2PQR/PROPKA when computing
+                        electrostatics (0–14).
+  --bfactor-min-value BFACTOR_MIN_VALUE
+                        Minimum value to be used for the bfactor color scale.
+  --bfactor-max-value BFACTOR_MAX_VALUE
+                        Maximum value to be used for the bfactor color scale.
+  --nosmooth            If chosen, the resulted maps are not smoothed
+                        (careful: this option should be used only for discrete
+                        values!).
+  --png                 If chosen, a map in PNG format is computed instead of
+                        the default PDF.
+  --keep                If chosen, all intermediary files are kept in the
+                        output.
+  --docker              If chosen, SURFMAP will be run on a Docker container
+                        (requires docker installed).
+  --plot3d              If set, also generate 3D scatter plots of the surface
+                        points using matplotlib.
+  --plot3d-point-size PLOT3D_POINT_SIZE
+                        Marker size for 3D scatter points (default: 2.0).
+  --plot3d-alpha PLOT3D_ALPHA
+                        Marker transparency for 3D scatter points (default:
+                        0.9).
+  --plot3d-view ELEV AZIM
+                        3D camera elevation and azimuth (default: 20, 35).
+  -pqr PQR              Path to a PQR file used for electrostatics
+                        calculation. Option only available if '-tomap
+                        electrosatics' is requested. Defaults to None.
+  -ff FF                Force-field used by pdb2pqr for electrostatics
+                        calculation. One of the following: AMBER, CHARMM,
+                        PARSE, TYL06, PEOEPB, SWANSON. Defaults to CHARMM.
+  -verbose VERBOSE      Verbose level of the console log. 0 for silence, 1 for
+                        info level, 2 for debug level. Defaults to 1.

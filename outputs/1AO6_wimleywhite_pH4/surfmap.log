@@ -1,0 +1,16 @@
+2025-09-10 15:21:44 — INFO — surfmap.lib.core.surfmap_from_pdb ........................... SURFACE MAPPING OF THE WIMLEY_WHITE PROPERTY
+2025-09-10 15:21:44 — INFO — surfmap.lib.core.surfmap_from_pdb ........................... Step 1: computing a shell around the protein surface
+2025-09-10 15:21:44 — DEBUG — surfmap.tools.compute_shell.run .............................. Convert pdb to xyzr format (expected MSMS input)
+2025-09-10 15:21:44 — DEBUG — surfmap.tools.compute_shell.run .............................. Running MSMS command: /home/ugfmo/code/surfmap/src/surfmap/utils/MSMS/msms -if /home/ugfmo/code/surfmap_MA/outputs/1AO6_wimleywhite_pH4/shells/1AO6.xyzr -of /home/ugfmo/code/surfmap_MA/outputs/1AO6_wimleywhite_pH4/shells/1AO6
+2025-09-10 15:21:44 — DEBUG — surfmap.tools.compute_shell.run .............................. Convert MSMS .vert file into CSV format
+2025-09-10 15:21:44 — DEBUG — surfmap.tools.compute_shell.run .............................. Convert CSV into PDB format
+2025-09-10 15:21:44 — INFO — surfmap.lib.core.surfmap_from_pdb ........................... Step 2: computing the property values and/or assign it to the shell particles
+2025-09-10 15:21:44 — DEBUG — surfmap.tools.SurfmapTools.run_particles_mapping .............................. Get dictionary of the PDB structure from 1AO6.pdb
+2025-09-10 15:21:45 — DEBUG — surfmap.tools.SurfmapTools.run_particles_mapping .............................. Get dictionary of the shell structure from /home/ugfmo/code/surfmap_MA/outputs/1AO6_wimleywhite_pH4/shells/1AO6_shell.pdb
+2025-09-10 15:21:45 — DEBUG — surfmap.tools.SurfmapTools.run_particles_mapping .............................. Retrieving the center of mass of the pdb structure
+2025-09-10 15:21:50 — INFO — surfmap.lib.core.surfmap_from_pdb ........................... Step 3: computing the 2D sinusoidal projection coordinates of each shell particle
+2025-09-10 15:21:50 — DEBUG — surfmap.lib.core.compute_coords_list .............................. Running the command: Rscript /home/ugfmo/code/surfmap/src/surfmap/scripts/computeCoordList.R -f /home/ugfmo/code/surfmap_MA/outputs/1AO6_wimleywhite_pH4/1AO6_wimley_white_partlist.out -s 5 -P sinusoidal -o /home/ugfmo/code/surfmap_MA/outputs/1AO6_wimleywhite_pH4
+2025-09-10 15:21:51 — INFO — surfmap.lib.core.surfmap_from_pdb ........................... Step 4: dividing the 2D projection into 72x36 cells and smoothing the values
+2025-09-10 15:21:51 — DEBUG — surfmap.lib.core.compute_matrix .............................. Running the command: Rscript /home/ugfmo/code/surfmap/src/surfmap/scripts/computeMatrices.R -i /home/ugfmo/code/surfmap_MA/outputs/1AO6_wimleywhite_pH4/coord_lists/1AO6_wimley_white_coord_list.txt -s 5 -P sinusoidal -o /home/ugfmo/code/surfmap_MA/outputs/1AO6_wimleywhite_pH4 --suffix _coord_list.txt
+2025-09-10 15:21:53 — INFO — surfmap.lib.core.surfmap_from_pdb ........................... Step 5: computing the 2D map
+2025-09-10 15:21:53 — DEBUG — surfmap.lib.core.compute_map .............................. Running the command: Rscript /home/ugfmo/code/surfmap/src/surfmap/scripts/computeMaps.R -i /home/ugfmo/code/surfmap_MA/outputs/1AO6_wimleywhite_pH4/smoothed_matrices/1AO6_wimley_white_smoothed_matrix.txt --wimley_white -s 5 -p 1AO6 -P sinusoidal -o /home/ugfmo/code/surfmap_MA/outputs/1AO6_wimleywhite_pH4 --suffix _smoothed_matrix.txt --png

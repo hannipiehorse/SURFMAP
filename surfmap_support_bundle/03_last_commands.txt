@@ -1,0 +1,20 @@
+ 1339  docker run --rm -v "$RUNS":/runs -v "$PDB_DIR":/pdbs surfmap_ma:ww-elec-pH8 bash -lc '
+  python -m surfmap.bin.surfmap \
+ 1341  cd ~/code/surfmap_MA
+ 1342  docker build --no-cache -t surfmap_ma:ww-elec-pH8 .
+ 1344  RUNS="/home/ugfmo/surfmap_runs"
+ 1347  docker run --rm -v "$RUNS":/runs -v "$PDB_DIR":/pdbs surfmap_ma:ww-elec-pH8 bash -lc '
+  python -m surfmap.bin.surfmap \
+ 1349  docker run --rm -v "$RUNS":/runs -v "$PDB_DIR":/pdbs surfmap_ma:ww-elec-pH8 bash -lc '
+  python -m surfmap.bin.surfmap \
+ 1351  IMG=surfmap_ma:fix-syntax
+ 1352  RUNS="/home/ugfmo/surfmap_runs"
+    python -m surfmap.bin.surfmap \
+ 1357  cd ~/code/surfmap_MA
+ 1358  docker build --no-cache -t surfmap_ma:fix-syntax .
+ 1360  IMG=surfmap_ma:fix-syntax
+ 1361  RUNS="/home/ugfmo/surfmap_runs"
+    python -m surfmap.bin.surfmap \
+ 1365  mkdir -p surfmap_support_bundle
+ 1366  surfmap -h | tee surfmap_support_bundle/02_cli_help.txt
+ 1367  history | grep -E 'surfmap|computeMaps\.R|compute_electrostatics' | tail -n 20 | tee surfmap_support_bundle/03_last_commands.txt

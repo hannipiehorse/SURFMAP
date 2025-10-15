@@ -341,16 +341,37 @@ for (file in (1:length(files))) {
     scale_at = c(-4.5,-3,-1.5,0,1.5,3,4.5)
     val_matrix = round(val_matrix,digits=2)
 
-  } else if (opt$wimley_white == TRUE) { # hydrophobicity scale
+  } else if (opt$wimley_white == TRUE) { # Wimley–White scale (GLY → 0)
     main_scale = "hydrophobicity scale Wimley-White"
     main_title = paste0("Wimley-White hydrophobicity map\n", pdb_id)
-    minval = 2.23
-    maxval = 6.1
-    range=abs(minval-maxval)
     scale_main <- "Wimley-White Hydrophobicity [kcal/mol]"
-    colors = c(seq(minval,minval+range*1/3,length=334),seq(minval+range*1/3,minval+range*2/3,length=333),seq(minval+range*2/3,maxval,length=334))
+
+    # 1) Apply shift from Python so that GLY becomes 0.0
+    ww_shift_str <- Sys.getenv("SURFMAP_WW_SHIFT", unset = "")
+    if (nchar(ww_shift_str) > 0) {
+      ww_shift <- suppressWarnings(as.numeric(ww_shift_str))
+      if (!is.na(ww_shift) && is.finite(ww_shift)) {
+        val_matrix <- val_matrix - ww_shift
+      }
+    }
+
+    # 2) Determine min/max from the shifted data actually in projection
+    minval <- min(val_matrix[proj])
+    maxval <- max(val_matrix[proj])
+    range  <- abs(minval - maxval)
+
+    # 3) Palette (keep the existing 5-anchor look)
     colorScale <- colorRampPalette(c("cadetblue", "cadetblue3", "#faf4e0", "orange3", "sienna4"))(1000)
-    scale_at = c(2.23,2.85,3.5,4.15,4.8,5.45,6.1)
+
+    # 4) tick locations for legend — seven nicely spaced values
+    scale_at <- c(ceiling(minval*100000)/100000,
+                  round(maxval - range*5/6, 5),
+                  round(maxval - range*4/6, 5),
+                  round(maxval - range*3/6, 5),
+                  round(maxval - range*2/6, 5),
+                  round(maxval - range*1/6, 5),
+                  floor(maxval*100000)/100000)
+
 
   } else if (opt$circular_variance == TRUE) { # circular variance scale
     main_scale = "CV"
