@@ -281,21 +281,24 @@ def compute_map(params: Parameters, matrix_file: str, property: str, reslist: st
     if params.bfactor_max_value is not None:
         cmd += ["--bfactor_max_value", str(params.bfactor_max_value)]
 
-    # Build a small env so R can pick up a title suffix (pH / salt)
+    # ---- Build env for the R script ----
     env = os.environ.copy()
     title_bits = []
     if getattr(params, "ph", None) is not None:
         title_bits.append(f"pH {params.ph:g}")
     if getattr(params, "salt", None) is not None:
         title_bits.append(f"{params.salt:g} M salt")
-    if title_bits:
-        env["SURFMAP_TITLE_SUFFIX"] = ", ".join(title_bits)
-    else:
-        # ensure it’s empty if nothing to add
-        env["SURFMAP_TITLE_SUFFIX"] = ""
+    env["SURFMAP_TITLE_SUFFIX"] = ", ".join(title_bits) if title_bits else ""
+
+    # WICHTIG: Für Wimley–White den gleichen Shift wie in 3D an R durchreichen,
+    # damit 2D und 3D dieselbe Null (GLY=0) verwenden.
+    if property == "wimley_white":
+        env["SURFMAP_WW_SHIFT"] = "4.24"
+        logger.info("Passing SURFMAP_WW_SHIFT=%s to R", env["SURFMAP_WW_SHIFT"])
 
     logger.debug(f"Running the command: {' '.join(cmd)}")
     proc_status = subprocess.call(cmd, env=env)
+
 
     if proc_status != 0:
         logger.error(f"Error occured during computing the map, the process will stop.")
@@ -557,6 +560,73 @@ def _values_from_partlist(partlist_path: Union[str, Path]):
 
     raise ValueError(f"Could not parse values from partlist: {p}")
 
+# --- WW helper: find Gly "zero" from the partlist ---
+def _ww_shift_from_partlist(partlist_path: Union[str, Path], fallback: float = 3.50) -> float:
+    """
+    Return the average Wimley-White value for glycine (GLY) from the shell partlist.
+    If no GLY rows are present/parseable, return 'fallback' (defaults to 3.50 kcal/mol).
+    """
+    gly_vals = []
+    p = Path(partlist_path)
+    if not p.is_file():
+        return float(fallback)
+
+    with p.open("r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            parts = s.replace(",", " ").split()
+            # expected: phi theta value resnb restype chain  (min 6 cols)
+            if len(parts) < 5:
+                continue
+            restype = parts[4].upper()
+            if restype in ("GLY", "G"):
+                try:
+                    v = float(parts[2])
+                    if np.isfinite(v):
+                        gly_vals.append(v)
+                except Exception:
+                    pass
+    if gly_vals:
+        return float(np.mean(gly_vals))
+    return float(fallback)
+
+def _glycine_shift_from_partlist(partlist_path: Union[str, Path]) -> float | None:
+    """
+    Read the particle list and estimate the WW value for Glycine (GLY)
+    from its rows. Returns the mean GLY value, or None if not found.
+    Expected columns (whitespace or CSV):
+        phi  theta  value  resnb  restype  chain
+    We use col 3 ('value') and col 5 ('restype').
+    """
+    p = Path(partlist_path)
+    if not p.is_file():
+        return None
+
+    gly_vals = []
+    with open(p, "r", encoding="utf-8", errors="ignore") as fh:
+        for line in fh:
+            s = line.strip()
+            if not s or s.lower().startswith("phi"):
+                continue
+            parts = [tok for tok in re.split(r"[,\s]+", s) if tok]
+            if len(parts) < 5:
+                continue
+            restype = parts[4].upper()
+            if restype in ("GLY", "G"):
+                try:
+                    v = float(parts[2])
+                except Exception:
+                    continue
+                if np.isfinite(v):
+                    gly_vals.append(v)
+
+    if not gly_vals:
+        return None
+    # average in case there are multiple GLY residues / particles
+    return float(np.mean(gly_vals))
+
 def _set_equal_3d_axes(ax, coords):
     """Make the 3D axes use the same scale so the protein doesn't look squashed."""
     mins = coords.min(axis=0)
@@ -740,6 +810,20 @@ def surfmap_from_pdb(params: Parameters, with_copyright: bool = True):
         )
         junk_optional.add(element=[reslist, partlist_outfile])
 
+        # --- WW zeroing: compute GLY shift if needed ---
+        gly_shift = None
+        if property == "wimley_white":
+            try:
+                gly_shift = _glycine_shift_from_partlist(partlist_outfile)
+                if gly_shift is not None:
+                    # store on params so compute_map() can pass it to R
+                    params.ww_shift = float(gly_shift)
+                    logger.info("Wimley-White: using GLY shift %.6g", params.ww_shift)
+                else:
+                    logger.warning("Wimley-White: no GLY residues found in partlist; no shift applied.")
+            except Exception as e:
+                logger.warning("Wimley-White: failed to compute GLY shift: %s", e)
+
         # --- Optional: 3D scatter + CSV -------------------------------------
         # We export the CSV if --csv3d is set, and we plot if --plot3d is set.
         if params.plot3d or params.csv3d:
@@ -775,6 +859,14 @@ def surfmap_from_pdb(params: Parameters, with_copyright: bool = True):
                 coords3d = coords3d[ok]
                 values = values[ok]
                 logger.info("3D: %d points after filtering", coords3d.shape[0])
+
+                # Center Wimley-White at Gly=0 for 3D & CSV (single source of truth)
+                if property == "wimley_white":
+                    ww_shift = _ww_shift_from_partlist(partlist_outfile)  # see helper above
+                    values = values - ww_shift
+                    # remember for 2D (R) so both maps match perfectly
+                    setattr(params, "_ww_shift", float(ww_shift))
+                    logger.info("Wimley-White: centered at Gly=0 (shift = %.3f)", ww_shift)
 
                 if coords3d.shape[0] == 0:
                     raise ValueError("No finite points to output (coords/values all NaN/inf?).")
@@ -837,8 +929,6 @@ def surfmap_from_pdb(params: Parameters, with_copyright: bool = True):
             except Exception as e:
                 logger.warning("3D output skipped due to: %s", e)
         # --- end 3D scatter + CSV -------------------------------------------
-
-
 
         # --- Step 4: project to 2D (coords list) -----------------------------
         step_index += 1

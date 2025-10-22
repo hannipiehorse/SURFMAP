@@ -210,14 +210,22 @@ def run(
     outdir.mkdir(exist_ok=True, parents=True)
     outfile_basename = str(outdir / Path(pdb_filename).stem)
 
+    # Resolve pdb2pqr executable robustly
+    pdb2pqr_exe = shutil.which("pdb2pqr") or shutil.which("pdb2pqr30")
+    if not pdb2pqr_exe:
+        logger.error("Neither 'pdb2pqr' nor 'pdb2pqr30' found on PATH inside the container.")
+        exit(1)
+
+
     # compute pqr file if not given as input
     outfile_pqr = f"{outfile_basename}.pqr"
     if not pqr_filename:
         cmd_pdb2pqr = [
-            "pdb2pqr30",
+            pdb2pqr_exe,
             "--ff", force_field,
             "--whitespace",
         ]
+
         # optional pH handling
         if ph is not None:
             cmd_pdb2pqr += ["--with-ph", str(ph)]

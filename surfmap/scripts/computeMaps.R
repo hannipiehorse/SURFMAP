@@ -286,6 +286,22 @@ for (file in (1:length(files))) {
   # in the plot, which correspond to (0,-minE).
   proj=which(val_matrix!=Inf)
 
+ # Apply the same WW shift as Python (if provided) so 2D matches 3D
+  ww_shift_env <- Sys.getenv("SURFMAP_WW_SHIFT", unset = "")
+  if (!is.na(prop_key) && prop_key == "wimley_white" && nchar(ww_shift_env) > 0) {
+    ww_shift <- suppressWarnings(as.numeric(ww_shift_env))
+    if (!is.na(ww_shift)) {
+      val_matrix <- val_matrix - ww_shift
+      # TEMP debug; safe to remove later
+      cat(sprintf("[SURFMAP] R applied WW shift: %.3f\n", ww_shift))
+    } else {
+      cat("[SURFMAP] R: SURFMAP_WW_SHIFT present but not numeric\n")
+    }
+  } else if (!is.na(prop_key) && prop_key == "wimley_white") {
+    cat("[SURFMAP] R: SURFMAP_WW_SHIFT not set; 2D will be unshifted\n")
+  }
+
+
   if (opt$electrostatics == TRUE) { # electrostatics scale
     main_scale = "electrostatic potential distribution scale"
 
@@ -341,36 +357,38 @@ for (file in (1:length(files))) {
     scale_at = c(-4.5,-3,-1.5,0,1.5,3,4.5)
     val_matrix = round(val_matrix,digits=2)
 
-  } else if (opt$wimley_white == TRUE) { # Wimley–White scale (GLY → 0)
+  } else if (opt$wimley_white == TRUE) { # hydrophobicity scale (Wimley–White, centered at GLY=0)
     main_scale = "hydrophobicity scale Wimley-White"
     main_title = paste0("Wimley-White hydrophobicity map\n", pdb_id)
-    scale_main <- "Wimley-White Hydrophobicity [kcal/mol]"
 
-    # 1) Apply shift from Python so that GLY becomes 0.0
-    ww_shift_str <- Sys.getenv("SURFMAP_WW_SHIFT", unset = "")
-    if (nchar(ww_shift_str) > 0) {
-      ww_shift <- suppressWarnings(as.numeric(ww_shift_str))
-      if (!is.na(ww_shift) && is.finite(ww_shift)) {
-        val_matrix <- val_matrix - ww_shift
-      }
-    }
-
-    # 2) Determine min/max from the shifted data actually in projection
+    # After any WW shift (done earlier) the data should be centered around 0.
+    # Compute symmetric limits around 0 so the diverging palette centers on white.
     minval <- min(val_matrix[proj])
     maxval <- max(val_matrix[proj])
-    range  <- abs(minval - maxval)
+    range_abs <- max(abs(minval), abs(maxval))  # half-range
+    minval <- -range_abs
+    maxval <-  range_abs
 
-    # 3) Palette (keep the existing 5-anchor look)
-    colorScale <- colorRampPalette(c("cadetblue", "cadetblue3", "#faf4e0", "orange3", "sienna4"))(1000)
+    # Use FULL SPAN for the legend breaks (this is 2*range_abs)
+    span <- maxval - minval  # = 2*range_abs
 
-    # 4) tick locations for legend — seven nicely spaced values
-    scale_at <- c(ceiling(minval*100000)/100000,
-                  round(maxval - range*5/6, 5),
-                  round(maxval - range*4/6, 5),
-                  round(maxval - range*3/6, 5),
-                  round(maxval - range*2/6, 5),
-                  round(maxval - range*1/6, 5),
-                  floor(maxval*100000)/100000)
+    scale_main <- "Wimley-White Hydrophobicity [kcal/mol]"
+
+    # Breaks: 3 equal segments across the FULL span (length must be length(col)+1)
+    colors <- c(
+      seq(minval,            minval + span*1/3, length=334),
+      seq(minval + span*1/3, minval + span*2/3, length=333),
+      seq(minval + span*2/3, maxval,            length=334)
+    )
+
+    # Diverging palette with white at center (odd number of anchors)
+    colorScale <- colorRampPalette(
+      c("cadetblue", "cadetblue3", "#faf4e0", "orange3", "sienna4")
+    )(1000)
+
+    # 7 ticks evenly spread across the FULL span (puts 0 exactly in the middle)
+    scale_at <- seq(minval, maxval, length.out = 7)
+
 
 
   } else if (opt$circular_variance == TRUE) { # circular variance scale
