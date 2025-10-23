@@ -13,7 +13,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from matplotlib.colors import LinearSegmentedColormap, ListedColormap, TwoSlopeNorm, to_rgb, to_hex
+from matplotlib.colors import LinearSegmentedColormap, ListedColormap, TwoSlopeNorm, to_rgb, to_hex, Normalize
 from matplotlib.ticker import ScalarFormatter
 
 from surfmap import PATH_MSMS, __COPYRIGHT_FULL__
@@ -694,10 +694,17 @@ def plot_3d_scatter(
     elec_max_abs=None,
     cmap_name="viridis",
     cmap_obj=None,
-    title=None ):
-
+    title=None
+):
+    """
+    3D scatter with a robust colorbar:
+      - electrostatics (or Wimley-White) → symmetric, zero-centered diverging scale
+      - everything else → linear min→max scale
+    If elec_max_abs is given, it defines ±v; otherwise we derive v from the data.
+    """
     coords = np.asarray(coords, float)
     values = np.asarray(values, float)
+
     if coords.ndim != 2 or coords.shape[1] != 3:
         raise ValueError(f"coords must be (N,3), got {coords.shape}")
     if values.ndim != 1 or values.shape[0] != coords.shape[0]:
@@ -709,40 +716,82 @@ def plot_3d_scatter(
     # prefer explicit object over name
     cmap = cmap_obj if cmap_obj is not None else plt.get_cmap(cmap_name)
 
-    if elec_max_abs is not None:
-        v = abs(float(elec_max_abs))
-        norm = TwoSlopeNorm(vmin=-v, vcenter=0.0, vmax=+v)
-        sc = ax.scatter(coords[:, 0], coords[:, 1], coords[:, 2],
-                        c=values, s=point_size, alpha=alpha, cmap=cmap, norm=norm)
-    else:
-        sc = ax.scatter(coords[:, 0], coords[:, 1], coords[:, 2],
-                        c=values, s=point_size, alpha=alpha, cmap=cmap)
+    # finite subset for limits
+    finite_vals = values[np.isfinite(values)]
+    if finite_vals.size == 0:
+        finite_vals = np.array([0.0])
 
+    # detect diverging properties by label or by the presence of elec_max_abs
+    name_lc = (prop_name or "").lower()
+    is_electrostatics = ("electrostatic" in name_lc) or (elec_max_abs is not None)
+    is_ww = ("wimley" in name_lc) or ("wimley-white" in name_lc) or ("wimley_white" in name_lc)
+    use_diverging = is_electrostatics or is_ww
+
+    if use_diverging:
+        # symmetric ±v around 0
+        if elec_max_abs is not None:
+            v = float(abs(elec_max_abs))
+        else:
+            v = float(np.nanmax(np.abs(finite_vals)))
+        if v == 0.0:
+            v = 1.0  # avoid flat colorbar
+        norm = TwoSlopeNorm(vmin=-v, vcenter=0.0, vmax=+v)
+    else:
+        vmin = float(np.nanmin(finite_vals))
+        vmax = float(np.nanmax(finite_vals))
+        if vmin == vmax:
+            vmax = vmin + 1.0
+        norm = Normalize(vmin=vmin, vmax=vmax)
+
+    # scatter
+    sc = ax.scatter(
+        coords[:, 0], coords[:, 1], coords[:, 2],
+        c=values, s=point_size, alpha=alpha, cmap=cmap, norm=norm, linewidths=0
+    )
+
+    # axis/view
     _set_equal_3d_axes(ax, coords)
     ax.set_xlabel("x"); ax.set_ylabel("y"); ax.set_zlabel("z")
     ax.view_init(elev=elev, azim=azim)
 
-    # --- colorbar ---
+    # colorbar
     cbar = fig.colorbar(sc, ax=ax, shrink=0.75, pad=0.02)
-    cbar.set_label(prop_name)
-    # Use raw numeric ticks (no fixed rounding)
-    sf = ScalarFormatter(useOffset=False, useMathText=False)
-    sf.set_powerlimits((-10, 10))  # avoid scientific notation for typical ranges
-    cbar.ax.yaxis.set_major_formatter(sf)
-    cbar.update_ticks()
 
-    # --- layout & title ---
+    if use_diverging:
+        # nice symmetric ticks (7 ticks from -v to +v)
+        v = getattr(norm, "vmax", None)
+        if v is None:
+            v = float(np.nanmax(np.abs(finite_vals))) or 1.0
+        ticks = np.linspace(-v, +v, 7)
+        cbar.set_ticks(ticks)
+        cbar.set_ticklabels([f"{t:.2f}" for t in ticks])
+
+        # labels
+        if is_electrostatics:
+            cbar.set_label("Electrostatic Potential [kT/e]")
+        elif is_ww:
+            cbar.set_label("Wimley-White Hydrophobicity [kcal/mol]")
+        else:
+            cbar.set_label(prop_name if isinstance(prop_name, str) else "")
+    else:
+        cbar.set_label(prop_name if isinstance(prop_name, str) else "")
+        sf = ScalarFormatter(useOffset=False, useMathText=False)
+        sf.set_powerlimits((-10, 10))
+        cbar.ax.yaxis.set_major_formatter(sf)
+        cbar.update_ticks()
+
+    # layout & title
     if title:
-        # reserve a bit of top margin so the suptitle isn't clipped
         fig.tight_layout(rect=[0, 0, 1, 0.95])
         fig.suptitle(title)
     else:
         fig.tight_layout()
 
-    # --- save ---
+    # save
     Path(Path(out_path).parent).mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
+
 
 
 def _pretty_prop_name(prop: str) -> str:
@@ -859,6 +908,22 @@ def surfmap_from_pdb(params: Parameters, with_copyright: bool = True):
                 coords3d = coords3d[ok]
                 values = values[ok]
                 logger.info("3D: %d points after filtering", coords3d.shape[0])
+
+                # --- NEW: robust outlier filter for electrostatics (APBS glitches etc.) ---
+                if property == "electrostatics":
+                    # Display cap (±X) is controlled by --elec-max-value; default to ±5 kT/e if not set
+                    cap = float(abs(params.elec_max_value)) if params.elec_max_value is not None else 5.0
+                    # Hard outlier cutoff: anything beyond ±10×cap is almost certainly garbage (e.g., grid edge issues)
+                    hard = 10.0 * cap
+
+                    pre = values.size
+                    keep = (values >= -hard) & (values <= hard)
+                    dropped = pre - int(keep.sum())
+                    if dropped:
+                        logger.warning("Electrostatics: dropping %d outliers beyond \u00B1%.3g kT/e", dropped, hard)
+
+                    coords3d = coords3d[keep]
+                    values   = values[keep]
 
                 # Center Wimley-White at Gly=0 for 3D & CSV (single source of truth)
                 if property == "wimley_white":
